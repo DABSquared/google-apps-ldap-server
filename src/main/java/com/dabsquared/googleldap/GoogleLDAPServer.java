@@ -1,5 +1,7 @@
 package com.dabsquared.googleldap;
 
+import com.google.api.services.admin.directory.model.User;
+import com.google.api.services.admin.directory.model.Users;
 import org.apache.commons.io.FileUtils;
 import org.apache.directory.api.ldap.model.name.Dn;
 import org.apache.directory.api.ldap.model.schema.SchemaManager;
@@ -49,8 +51,11 @@ public class GoogleLDAPServer {
     private DirectoryService service;
     private LdapServer server;
 
-    public GoogleLDAPServer(File workDir) {
+    private String domain;
+
+    public GoogleLDAPServer(File workDir, String domain) {
         this.workDir = workDir;
+        this.domain = domain;
         // Initialize the LDAP service
         try {
             service = new DefaultDirectoryService();
@@ -130,7 +135,7 @@ public class GoogleLDAPServer {
 
         //Disable Anoymous Access
         //service.setAccessControlEnabled(true);
-        service.setAllowAnonymousAccess(false);
+        service.setAllowAnonymousAccess(true);
 
         List<Interceptor> interceptors = service.getInterceptors();
 
@@ -143,6 +148,13 @@ public class GoogleLDAPServer {
                 ai.setAuthenticators(auths);
             }
         }
+
+        GooglePartition googlePartition = new GooglePartition(domain);
+        googlePartition.setId("google");
+        googlePartition.setSchemaManager(service.getSchemaManager());
+        googlePartition.initialize();
+        service.addPartition(googlePartition);
+
         // And start the service
         service.startup();
     }
@@ -176,7 +188,7 @@ public class GoogleLDAPServer {
         server.setTransports(t);
         server.setDirectoryService(service);
         server.start();
-    }//startServer
+    }
 
 
 
@@ -199,7 +211,7 @@ public class GoogleLDAPServer {
             workDir.mkdirs();
 
             // Create the server
-            GoogleLDAPServer googleLDAPServer = new GoogleLDAPServer(workDir);
+            GoogleLDAPServer googleLDAPServer = new GoogleLDAPServer(workDir, "klinche.com");
 
             // Start the server
             googleLDAPServer.startServer();
