@@ -469,10 +469,10 @@ public class GooglePartition implements Partition {
                 userEntry.put(SchemaConstants.CN_AT, username);
                 userEntry.put(SchemaConstants.UID_AT, username);
                 userEntry.put(SchemaConstants.EMAIL_AT, user.getPrimaryEmail());
-                userEntry.put( SchemaConstants.GIVENNAME_AT, user.getName().getGivenName());
+                userEntry.put(SchemaConstants.GIVENNAME_AT, user.getName().getGivenName());
                 userEntry.put(SchemaConstants.SN_AT, user.getName().getFamilyName());
                 userEntry.put(SchemaConstants.OU_AT, "users");
-                userEntry.put(SchemaConstants.UID_NUMBER_AT, user.getId());
+                //userEntry.put(SchemaConstants.UID_NUMBER_AT, user.getId());
 
 //                //Note: Emulate AD memberof attribute
 //                if(m_emulateADmemberOf) {

@@ -9,6 +9,7 @@ import org.apache.directory.api.ldap.model.schema.registries.SchemaLoader;
 import org.apache.directory.api.ldap.schema.loader.JarLdifSchemaLoader;
 import org.apache.directory.api.ldap.schema.loader.LdifSchemaLoader;
 import org.apache.directory.api.ldap.schema.manager.impl.DefaultSchemaManager;
+import org.apache.directory.server.configuration.ApacheDS;
 import org.apache.directory.server.constants.ServerDNConstants;
 import org.apache.directory.server.core.DefaultDirectoryService;
 import org.apache.directory.server.core.api.DirectoryService;
@@ -79,7 +80,10 @@ public class GoogleLDAPServer {
     private void loadSchemas() throws Exception
     {
         log.debug("Starting to load the schema.");
-        File schemaRepository = new File(workDir, "schema");
+        service.setInstanceLayout(new InstanceLayout(this.workDir));
+        String workingDirectory = service.getInstanceLayout().getPartitionsDirectory().getPath();
+
+        File schemaRepository = new File(workingDirectory, "schema");
 
         SchemaManager schemaManager = new DefaultSchemaManager();
         schemaManager.loadAllEnabled();
@@ -95,7 +99,6 @@ public class GoogleLDAPServer {
         ldifPartition.setPartitionPath(schemaRepository.toURI());
 
         schemaPartition.setWrappedPartition(ldifPartition);
-        service.setInstanceLayout(new InstanceLayout(this.workDir));
 
 
         // We have to load the schema now, otherwise we won't be able
@@ -155,6 +158,8 @@ public class GoogleLDAPServer {
         googlePartition.initialize();
         service.addPartition(googlePartition);
 
+
+
         // And start the service
         service.startup();
     }
@@ -189,11 +194,6 @@ public class GoogleLDAPServer {
         server.setDirectoryService(service);
         server.start();
     }
-
-
-
-
-
 
 
     /**
