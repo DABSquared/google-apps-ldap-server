@@ -12,7 +12,6 @@ import com.google.api.client.json.JsonFactory;
 import com.google.api.client.util.store.FileDataStoreFactory;
 
 import com.google.api.services.admin.directory.DirectoryScopes;
-import com.google.api.services.admin.directory.model.*;
 import com.google.api.services.admin.directory.Directory;
 
 import java.io.IOException;
@@ -23,10 +22,10 @@ import java.util.List;
 /**
  * Created by daniel on 6/28/16.
  */
-public class DirectoryService {
+public class GoogleDirectoryService {
     /** Application name. */
     private static final String APPLICATION_NAME =
-            "Crowd Google Apps";
+            "Google Apps LDAP";
 
     /** Directory to store user credentials for this application. */
     private static final java.io.File DATA_STORE_DIR = new java.io.File(
@@ -48,7 +47,7 @@ public class DirectoryService {
      * at ~/.credentials/admin-directory_v1-java-quickstart.json
      */
     private static final List<String> SCOPES =
-            Arrays.asList(DirectoryScopes.ADMIN_DIRECTORY_USER_READONLY);
+            Arrays.asList(DirectoryScopes.ADMIN_DIRECTORY_USER_READONLY, DirectoryScopes.ADMIN_DIRECTORY_GROUP_READONLY, DirectoryScopes.ADMIN_DIRECTORY_GROUP_MEMBER_READONLY);
 
     static {
         try {
@@ -68,7 +67,7 @@ public class DirectoryService {
     public static Credential authorize() throws IOException {
         // Load client secrets.
         InputStream in =
-                DirectoryService.class.getResourceAsStream("/client_secret.json");
+                GoogleDirectoryService.class.getResourceAsStream("/client_secret.json");
         GoogleClientSecrets clientSecrets =
                 GoogleClientSecrets.load(JSON_FACTORY, new InputStreamReader(in));
 
