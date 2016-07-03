@@ -54,14 +54,11 @@ public class GoogleLDAPServer {
     private File workDir = null;
     private DirectoryService service;
     private LdapServer server;
-    private File ldifDirectory;
     private String domain;
-    private final List<LdifLoadFilter> ldifFilters = new ArrayList();
 
     public GoogleLDAPServer(File workDir, String domain) {
         this.workDir = workDir;
         this.domain = domain;
-        this.ldifDirectory = new File("ldifs");
 
         // Initialize the LDAP service
         try {
@@ -85,19 +82,6 @@ public class GoogleLDAPServer {
         File schemaRepository = new File(workingDirectory, "schema");
         SchemaLdifExtractor extractor = new DefaultSchemaLdifExtractor(new File(workingDirectory));
         extractor.extractOrCopy(true);
-
-
-
-//        ArrayList<String> files = new ArrayList<String>();
-//        files.add("/schema/ou=schema/cn=rfc2307bis/ou=attributetypes/m-oid=1.3.6.1.1.1.1.0.ldif");
-//
-//        for(String filename : files) {
-//            String source = "/partitions" + filename;
-//            String destname = "work/partitions" + filename;
-//            URL inputUrl = getClass().getResource(source);
-//            File dest = new File(destname);
-//            FileUtils.copyURLToFile(inputUrl, dest);
-//        }
 
         File folder = new File("work/partitions/schema/ou=schema");
         File[] listOfFiles = folder.listFiles();

@@ -2,6 +2,8 @@ package com.dabsquared.googleldap;
 
 import com.dabsquared.googleldap.util.LRUCacheMap;
 import com.google.api.client.util.ArrayMap;
+import com.google.api.services.admin.directory.model.Group;
+import com.google.api.services.admin.directory.model.Member;
 import com.google.api.services.admin.directory.model.User;
 import com.google.api.services.admin.directory.model.Users;
 import org.apache.directory.api.ldap.model.constants.SchemaConstants;
@@ -34,6 +36,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
+
+import static java.lang.Math.abs;
 
 /**
  * Created by daniel on 6/29/16.
@@ -361,12 +365,13 @@ public class GooglePartition implements Partition {
 
             List<Entry> l = new ArrayList<Entry>();
             try {
-                //TermRestriction<String> groupName = new TermRestriction<String>(GroupTermKeys.NAME, MatchMode.CONTAINS, "");
-                //List<String> list = m_CrowdClient.searchGroupNames(groupName, 0, Integer.MAX_VALUE);
-                //for (String gn : list) {
-                  //  Dn gdn = new Dn(this.schemaManager, String.format("uid=%s,%s", gn, GOOGLE_GROUPS_DN));
-                    //TODO: l.add(createGroupEntry(gdn));
-                //}
+                List<Group> groups = service.getDirectoryService().groups().list().setCustomer("my_customer").execute().getGroups();
+
+                for (Group group : groups) {
+                    String groupname = group.getEmail().split("@")[0];
+                    Dn gdn = new Dn(this.schemaManager, String.format("cn=%s,%s", groupname, GOOGLE_GROUPS_DN));
+                    l.add(createGroupEntry(gdn, group));
+                }
             } catch (Exception ex) {
                 log.error("findOneLevel()", ex);
             }
@@ -489,6 +494,69 @@ public class GooglePartition implements Partition {
             }
         }
         return userEntry;
+    }
+
+    private Entry createGroupEntry(Dn dn, Group group) {
+        Entry groupEntry = entryCache.get(dn.getName());
+        try {
+            dn.apply(this.schemaManager);
+        } catch (LdapInvalidDnException e) {
+            e.printStackTrace();
+        }
+        if (groupEntry == null) {
+            try {
+                //1. Obtain from Google
+                Rdn rdn = dn.getRdn(0);
+                String groupname = rdn.getNormValue();
+
+                String groupToCheck = groupname;
+                if (domain != null) {
+                    groupToCheck = groupname + "@" + this.domain;
+                }
+
+                if (group == null) {
+                    group = service.getDirectoryService().groups().get(groupToCheck).execute();
+                }
+
+                //2. Create entry
+                groupEntry = new DefaultEntry(schemaManager, dn);
+                groupEntry.put(SchemaConstants.OBJECT_CLASS_AT, SchemaConstants.TOP_OC, "posixGroup");
+                groupEntry.put(SchemaConstants.GID_NUMBER_AT, "" + abs(group.getId().hashCode()));
+
+                if (group.getDescription() != null && !group.getDescription().equals("")) {
+                    groupEntry.put(SchemaConstants.DESCRIPTION_AT, group.getDescription());
+                }
+
+                // Print the first 10 users in the domain.
+                List<Member> members = null;
+                try {
+                    members = service.getDirectoryService().members().list(group.getId()).execute().getMembers();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+
+                groupEntry.put(SchemaConstants.MEMBER_UID_AT, "");
+
+                for (Member member: members) {
+                    if (member.getEmail() == null) {
+//                        for(User user : users) {
+//                            String uuid = user.getPrimaryEmail().split("@")[0];
+//                            attributes[1].add(uuid);
+//                        }
+                    } else {
+                        String uuid = member.getEmail().split("@")[0];
+                        groupEntry.add(SchemaConstants.MEMBER_UID_AT, uuid);
+                    }
+                }
+
+
+
+                entryCache.put(dn.getName(), groupEntry);
+            } catch (Exception ex) {
+                log.debug("createUserEntry()", ex);
+            }
+        }
+        return groupEntry;
     }
 
     private boolean isGoogle(Dn dn) {
