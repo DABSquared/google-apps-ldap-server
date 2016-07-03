@@ -1,44 +1,48 @@
 package com.dabsquared.googleldap;
 
-import com.google.api.services.admin.directory.model.User;
-import com.google.api.services.admin.directory.model.Users;
 import org.apache.commons.io.FileUtils;
+import org.apache.commons.lang.StringUtils;
+import org.apache.directory.api.ldap.model.constants.AuthenticationLevel;
+import org.apache.directory.api.ldap.model.entry.Entry;
 import org.apache.directory.api.ldap.model.name.Dn;
 import org.apache.directory.api.ldap.model.schema.SchemaManager;
 import org.apache.directory.api.ldap.model.schema.registries.SchemaLoader;
-import org.apache.directory.api.ldap.schema.loader.JarLdifSchemaLoader;
+import org.apache.directory.api.ldap.schema.extractor.SchemaLdifExtractor;
+import org.apache.directory.api.ldap.schema.extractor.impl.DefaultSchemaLdifExtractor;
 import org.apache.directory.api.ldap.schema.loader.LdifSchemaLoader;
 import org.apache.directory.api.ldap.schema.manager.impl.DefaultSchemaManager;
-import org.apache.directory.server.configuration.ApacheDS;
+import org.apache.directory.api.util.Strings;
 import org.apache.directory.server.constants.ServerDNConstants;
 import org.apache.directory.server.core.DefaultDirectoryService;
 import org.apache.directory.server.core.api.DirectoryService;
 import org.apache.directory.server.core.api.InstanceLayout;
+import org.apache.directory.server.core.api.entry.ClonedServerEntry;
 import org.apache.directory.server.core.api.interceptor.Interceptor;
 import org.apache.directory.server.core.api.schema.SchemaPartition;
 import org.apache.directory.server.core.authn.AuthenticationInterceptor;
 import org.apache.directory.server.core.authn.Authenticator;
 import org.apache.directory.server.core.partition.impl.btree.jdbm.JdbmPartition;
 import org.apache.directory.server.core.partition.ldif.LdifPartition;
+import org.apache.directory.server.i18n.I18n;
 import org.apache.directory.server.ldap.LdapServer;
-import org.apache.directory.server.ldap.handlers.extended.StartTlsHandler;
+import org.apache.directory.server.protocol.shared.store.LdifFileLoader;
+import org.apache.directory.server.protocol.shared.store.LdifLoadFilter;
 import org.apache.directory.server.protocol.shared.transport.TcpTransport;
 import org.apache.directory.server.protocol.shared.transport.Transport;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.mortbay.util.IO;
 
 
 import java.io.File;
-import java.io.FileReader;
-import java.text.MessageFormat;
-import java.util.Properties;
-import java.util.ResourceBundle;
 
-import java.io.*;
-import java.text.MessageFormat;
+import java.io.FileFilter;
+import java.io.IOException;
+import java.net.URL;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.*;
-
-import static org.apache.directory.server.core.integ.AbstractLdapTestUnit.service;
 
 
 /**
@@ -48,27 +52,21 @@ public class GoogleLDAPServer {
     private static final Logger log = LogManager.getLogger(GoogleLDAPServer.class);
 
     private File workDir = null;
-
     private DirectoryService service;
     private LdapServer server;
-
+    private File ldifDirectory;
     private String domain;
+    private final List<LdifLoadFilter> ldifFilters = new ArrayList();
 
     public GoogleLDAPServer(File workDir, String domain) {
         this.workDir = workDir;
         this.domain = domain;
+        this.ldifDirectory = new File("ldifs");
+
         // Initialize the LDAP service
         try {
             service = new DefaultDirectoryService();
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        try {
             this.loadSchemas();
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        try {
             this.loadDirectoryService();
         } catch (Exception e) {
             e.printStackTrace();
@@ -83,9 +81,45 @@ public class GoogleLDAPServer {
         service.setInstanceLayout(new InstanceLayout(this.workDir));
         String workingDirectory = service.getInstanceLayout().getPartitionsDirectory().getPath();
 
+        // Extract the schema on disk (a brand new one) and load the registries
         File schemaRepository = new File(workingDirectory, "schema");
+        SchemaLdifExtractor extractor = new DefaultSchemaLdifExtractor(new File(workingDirectory));
+        extractor.extractOrCopy(true);
 
-        SchemaManager schemaManager = new DefaultSchemaManager();
+
+
+//        ArrayList<String> files = new ArrayList<String>();
+//        files.add("/schema/ou=schema/cn=rfc2307bis/ou=attributetypes/m-oid=1.3.6.1.1.1.1.0.ldif");
+//
+//        for(String filename : files) {
+//            String source = "/partitions" + filename;
+//            String destname = "work/partitions" + filename;
+//            URL inputUrl = getClass().getResource(source);
+//            File dest = new File(destname);
+//            FileUtils.copyURLToFile(inputUrl, dest);
+//        }
+
+        File folder = new File("work/partitions/schema/ou=schema");
+        File[] listOfFiles = folder.listFiles();
+
+        ArrayList<File> files = new ArrayList<File>();
+
+        for (int i = 0; i < listOfFiles.length; i++) {
+            if (listOfFiles[i].isFile()) {
+                files.add(listOfFiles[i]);
+            }
+        }
+
+        Charset charset = StandardCharsets.UTF_8;
+        for(File file : files) {
+            String content = new String(Files.readAllBytes(file.toPath()), charset);
+            content = content.replaceAll("m-disabled: TRUE", "m-disabled: FALSE");
+            Files.write(file.toPath(), content.getBytes(charset));
+        }
+
+        SchemaLoader loader = new LdifSchemaLoader(schemaRepository);
+        SchemaManager schemaManager = new DefaultSchemaManager(loader);
+
         schemaManager.loadAllEnabled();
         service.setSchemaManager(schemaManager);
 
@@ -105,7 +139,6 @@ public class GoogleLDAPServer {
         // to initialize the Partitions, as we won't be able to parse
         // and normalize their suffix DN
         schemaManager.loadAllEnabled();
-
 
 
         List<Throwable> errors = schemaManager.getErrors();
@@ -147,18 +180,16 @@ public class GoogleLDAPServer {
                 log.debug("" + interceptor.getName());
                 AuthenticationInterceptor ai = (AuthenticationInterceptor) interceptor;
                 Set<Authenticator> auths = new HashSet<Authenticator>();
-                //auths.add(new CrowdAuthenticator(m_CrowdClient, service)); //TODO: Make a google authenticator
+                auths.add(new GoogleAuthenticator(AuthenticationLevel.SIMPLE, this.domain)); //TODO: Make a google authenticator
                 ai.setAuthenticators(auths);
             }
         }
 
         GooglePartition googlePartition = new GooglePartition(domain);
-        googlePartition.setId("google");
+        googlePartition.setId("klinche");
         googlePartition.setSchemaManager(service.getSchemaManager());
         googlePartition.initialize();
         service.addPartition(googlePartition);
-
-
 
         // And start the service
         service.startup();
@@ -176,24 +207,11 @@ public class GoogleLDAPServer {
 
         Transport t = new TcpTransport(serverPort);
 
-        //SSL Support
-        boolean sslEnabled = false;
-
-        if(sslEnabled) {
-            String keyStore = "etc/ldap-server.keystore";
-            String password = "changeit";
-
-            t.setEnableSSL(true);
-            server.setKeystoreFile(keyStore);
-            server.setCertificatePassword(password);
-            server.addExtendedOperationHandler(new StartTlsHandler());
-
-        }
-
         server.setTransports(t);
         server.setDirectoryService(service);
         server.start();
     }
+
 
 
     /**
@@ -211,7 +229,7 @@ public class GoogleLDAPServer {
             workDir.mkdirs();
 
             // Create the server
-            GoogleLDAPServer googleLDAPServer = new GoogleLDAPServer(workDir, "klinche.com");
+            GoogleLDAPServer googleLDAPServer = new GoogleLDAPServer(workDir, args[0]);
 
             // Start the server
             googleLDAPServer.startServer();
@@ -219,4 +237,8 @@ public class GoogleLDAPServer {
             log.error("main()", e);
         }
     }
+
+
+
+
 }

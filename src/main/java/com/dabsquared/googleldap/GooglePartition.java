@@ -1,6 +1,7 @@
 package com.dabsquared.googleldap;
 
 import com.dabsquared.googleldap.util.LRUCacheMap;
+import com.google.api.client.util.ArrayMap;
 import com.google.api.services.admin.directory.model.User;
 import com.google.api.services.admin.directory.model.Users;
 import org.apache.directory.api.ldap.model.constants.SchemaConstants;
@@ -41,13 +42,12 @@ public class GooglePartition implements Partition {
 
     private static final Logger log = LogManager.getLogger(GooglePartition.class);
 
-    private static final String GOOGLE_DN = "dc=google";
-    private static final String GOOGLE_GROUPS_DN = "ou=groups,dc=google";
-    private static final String GOOGLE_USERS_DN = "ou=users,dc=google";
+    private String GOOGLE_DN = "";
+    private String GOOGLE_GROUPS_DN = "ou=groups,";
+    private String GOOGLE_USERS_DN = "ou=users,";
     private static final String MODIFICATION_NOT_ALLOWED_MSG = "This simple partition does not allow modification.";
 
     private SchemaManager schemaManager;
-    private String suffix = GOOGLE_DN;
 
     private Dn googleDn;
 
@@ -73,6 +73,12 @@ public class GooglePartition implements Partition {
         entryCache = new LRUCacheMap<String, Entry>(300);
         this.domain = domain;
 
+        String[] splits = this.domain.split("\\.");
+        GOOGLE_DN = "dc=" + splits[0] + ",dc=" + splits[1];
+
+        GOOGLE_GROUPS_DN = GOOGLE_GROUPS_DN + GOOGLE_DN;
+        GOOGLE_USERS_DN = GOOGLE_USERS_DN + GOOGLE_DN;
+
         // Build a new authorized API client service.
         service = new com.dabsquared.googleldap.DirectoryService();
     }
@@ -94,40 +100,20 @@ public class GooglePartition implements Partition {
     }
 
     public void initialize() throws LdapException {
-        // Print the first 10 users in the domain.
-        Users result = null;
-        try {
-            result = service.getDirectoryService().users().list()
-                    .setCustomer("my_customer")
-                    .setMaxResults(10)
-                    .setOrderBy("email")
-                    .execute();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-        List<User> users = result.getUsers();
-        if (users == null || users.size() == 0) {
-            System.out.println("No users found.");
-        } else {
-            System.out.println("Users:");
-            for (User user : users) {
-                System.out.println(user.getName().getFullName());
-            }
-        }
         if (!initialized.getAndSet(true)) {
 
             log.debug("==> GooglePartition::init");
 
-            String infoMsg = String.format("Initializing %s with m_Suffix %s", this.getClass().getSimpleName(), suffix);
+            String infoMsg = String.format("Initializing %s with %s", this.getClass().getSimpleName(), GOOGLE_DN);
             log.info(infoMsg);
 
             // Create LDAP Dn
-            googleDn = new Dn(schemaManager, suffix);
+            googleDn = new Dn(schemaManager, GOOGLE_DN);
 
             Rdn rdn = googleDn.getRdn();
             googleEntry = new DefaultEntry(schemaManager, googleDn);
-            googleEntry.put(SchemaConstants.OBJECT_CLASS_AT, SchemaConstants.TOP_OC, SchemaConstants.DOMAIN_OC);
-            googleEntry.put(SchemaConstants.DC_AT, rdn.getAva().getValue().toString());
+            googleEntry.put(SchemaConstants.OBJECT_CLASS_AT, SchemaConstants.TOP_OC, SchemaConstants.DOMAIN_OC, SchemaConstants.DC_OBJECT_OC);
+            googleEntry.put(SchemaConstants.DC_AT, googleDn.getRdn(0).getValue());
             googleEntry.put("description", "Google Domain");
 
 
@@ -246,19 +232,19 @@ public class GooglePartition implements Partition {
           log.debug("hasEntry(dn=" + hasEntryOperationContext.getDn() + ")");
         }
 
-        if (entryCache.containsKey(hasEntryOperationContext.getDn())) {
+        if (entryCache.containsKey(hasEntryOperationContext.getDn().getName())) {
             return true;
         } else {
             int dnSize = dn.size();
 
-            if (dnSize == 1) {
+            if (dnSize == 2) {
                 if (isGoogle(dn)) {
                     entryCache.put(dn.getName(), googleEntry);
                     return true;
                 } else {
                     return false;
                 }
-            } else if (dnSize == 2) {
+            } else if (dnSize == 3) {
                 if (isGoogleGroups(dn)) {
                     entryCache.put(dn.getName(), googleGroupsEntry);
                     return true;
@@ -268,7 +254,7 @@ public class GooglePartition implements Partition {
                 } else {
                     return false;
                 }
-            } else if (dnSize == 3) {
+            } else if (dnSize == 4) {
                 Dn prefix = dn.getParent();
                 try {
                     prefix.apply(schemaManager);
@@ -280,7 +266,7 @@ public class GooglePartition implements Partition {
                     Rdn rdn = dn.getRdn(2);
                     String user = rdn.getNormValue();
                     log.debug("user=" + user);
-                    Entry userEntry = createUserEntry(dn);
+                    Entry userEntry = createUserEntry(dn, null);
                     return (userEntry != null);
                 } else if(isGoogleGroups(prefix)) {
                     Rdn rdn = dn.getRdn(2);
@@ -290,8 +276,8 @@ public class GooglePartition implements Partition {
                     return (groupEntry != null);
                 } else {
                     log.debug("Prefix is neither users nor groups");
-                    log.debug("Crowd Users = " + googleUsersEntry.getDn());
-                    log.debug("Crowd Groups = " + googleGroupsEntry.getDn().toString());
+                    log.debug("Google Users = " + googleUsersEntry.getDn());
+                    log.debug("Google Groups = " + googleGroupsEntry.getDn().toString());
                     return false;
                 }
             }
@@ -339,7 +325,6 @@ public class GooglePartition implements Partition {
 
     private EntryFilteringCursor findObject(SearchOperationContext ctx) {
         Dn dn = ctx.getDn();
-        String dnName = dn.getName();
         Entry se = ctx.getEntry();
 
         //1. Try cache
@@ -357,9 +342,7 @@ public class GooglePartition implements Partition {
         Entry se = ctx.getEntry();
 
         if(se == null) {
-            String name = dn.getRdn(0).getNormValue();
-            log.debug("Name=" + name);
-            if("google".equals(name)) {
+            if(dn.equals(this.googleDn)) {
                 return new EntryFilteringCursorImpl(new EmptyCursor<Entry>(), ctx, this.schemaManager);
             }
         }
@@ -374,9 +357,7 @@ public class GooglePartition implements Partition {
             );
         }
         //2. Groups
-        if (dn.getName().equals(googleGroupsEntry.getDn().getName())) {
-            //Retrieve Filter
-            //if (ctx.getFilter().toString().contains("(2.5.4.0=*)")) {
+        if (dn.equals(googleGroupsEntry.getDn())) {
 
             List<Entry> l = new ArrayList<Entry>();
             try {
@@ -394,26 +375,19 @@ public class GooglePartition implements Partition {
                     ctx,
                     this.schemaManager
             );
-            //}
         }
 
         //3. Users
-        if (dn.getName().equals(googleUsersEntry.getDn().getName())) {
-            //Retrieve Filter
-            String filter = ctx.getFilter().toString();
-            //if (filter.contains("(2.5.4.0=*)") ||  filter.contains("(2.5.4.0=referral)")) {
-
-
+        if (dn.equals(googleUsersEntry.getDn())) {
             List<Entry> l = new ArrayList<Entry>();
             try {
-
                 List<User> users = this.service.getDirectoryService().users().list().setCustomer("my_customer").execute().getUsers();
                 for (User un : users) {
                     String email = un.getPrimaryEmail();
                     String[] tokens = email.split("@");
 
-                    Dn udn = new Dn(this.schemaManager, String.format("uid=%s,%s", tokens[0], GOOGLE_USERS_DN));
-                    l.add(createUserEntry(udn));
+                    Dn udn = new Dn(this.schemaManager, String.format("cn=%s,%s", tokens[0], GOOGLE_USERS_DN));
+                    l.add(createUserEntry(udn, un));
                 }
             } catch (Exception ex) {
                 log.error("findOneLevel()", ex);
@@ -423,7 +397,6 @@ public class GooglePartition implements Partition {
                     ctx,
                     this.schemaManager
             );
-            //}
         }
 
         // return an empty result
@@ -440,10 +413,13 @@ public class GooglePartition implements Partition {
 
 
 
-
-
-    private Entry createUserEntry(Dn dn) {
+    private Entry createUserEntry(Dn dn, User user) {
         Entry userEntry = entryCache.get(dn.getName());
+        try {
+            dn.apply(this.schemaManager);
+        } catch (LdapInvalidDnException e) {
+            e.printStackTrace();
+        }
         if (userEntry == null) {
             try {
                 //1. Obtain from Google
@@ -455,47 +431,57 @@ public class GooglePartition implements Partition {
                     userToCheck = username + "@" + this.domain;
                 }
 
-                // Print the first 10 users in the domain.
-                User user = this.service.getDirectoryService().users().get(userToCheck).execute();
-
                 if (user == null) {
-                    return null;
+                    user = service.getDirectoryService().users().get(userToCheck).execute();
                 }
 
                 //2. Create entry
                 userEntry = new DefaultEntry(schemaManager, dn);
-                userEntry.put(SchemaConstants.OBJECT_CLASS, SchemaConstants.INET_ORG_PERSON_OC);
-                userEntry.put(SchemaConstants.OBJECT_CLASS_AT, SchemaConstants.TOP_OC, SchemaConstants.ORGANIZATIONAL_PERSON_OC, SchemaConstants.PERSON_OC, SchemaConstants.INET_ORG_PERSON_OC);
+                userEntry.put("objectClass", SchemaConstants.INET_ORG_PERSON_OC);
+                userEntry.put(SchemaConstants.OBJECT_CLASS_AT, SchemaConstants.TOP_OC, SchemaConstants.ORGANIZATIONAL_PERSON_OC, SchemaConstants.PERSON_OC, SchemaConstants.INET_ORG_PERSON_OC, "posixAccount");
                 userEntry.put(SchemaConstants.CN_AT, username);
+                userEntry.put(SchemaConstants.CN_AT, user.getName().getFullName());
                 userEntry.put(SchemaConstants.UID_AT, username);
                 userEntry.put(SchemaConstants.EMAIL_AT, user.getPrimaryEmail());
                 userEntry.put(SchemaConstants.GIVENNAME_AT, user.getName().getGivenName());
                 userEntry.put(SchemaConstants.SN_AT, user.getName().getFamilyName());
                 userEntry.put(SchemaConstants.OU_AT, "users");
-                //userEntry.put(SchemaConstants.UID_NUMBER_AT, user.getId());
+                userEntry.put(SchemaConstants.UID_NUMBER_AT, user.getId());
 
-//                //Note: Emulate AD memberof attribute
-//                if(m_emulateADmemberOf) {
-//                    //groups
-//                    List<String> groups = m_CrowdClient.getNamesOfGroupsForUser(user, 0, Integer.MAX_VALUE);
-//                    for (String g : groups) {
-//                        Dn mdn = new Dn(this.m_SchemaManager, String.format("cn=%s,%s", g, CROWD_GROUPS_DN));
-//                        userEntry.add("memberof", mdn.getName());
-//                    }
-//                    if(m_includeNested) {
-//                        //groups
-//                        groups = m_CrowdClient.getNamesOfGroupsForNestedUser(user, 0, Integer.MAX_VALUE);
-//                        for (String g : groups) {
-//                            Dn mdn = new Dn(this.m_SchemaManager, String.format("cn=%s,%s", g, CROWD_GROUPS_DN));
-//                            if (!userEntry.contains("memberof", mdn.getName())) {
-//                                userEntry.add("memberof", mdn.getName());
-//                            }
-//                        }
-//                    }
-//                }
+                List <ArrayMap> phones = (List<ArrayMap>) user.getPhones();
+                if (phones != null) {
+                    for (ArrayMap phone: phones) {
+                        if (phone.get("type").equals("mobile")) {
+                            userEntry.put(SchemaConstants.MOBILE_TELEPHONE_NUMBER_AT, phone.get("value").toString());
+                        } else if (phone.get("type").equals("work")) {
+                            userEntry.put(SchemaConstants.TELEPHONE_NUMBER_AT, phone.get("value").toString());
+                        }
+                    }
+                }
 
 
-                log.debug(userEntry.toString());
+                List <ArrayMap> emails = (List<ArrayMap>) user.getEmails();
+                if (emails != null) {
+                    for (ArrayMap email: emails) {
+                        userEntry.add(SchemaConstants.EMAIL_AT, email.get("address").toString());
+                    }
+                }
+
+                // Print the first 10 users in the domain.
+                List<ArrayMap> aliases = null;
+                try {
+                    aliases = (List<ArrayMap>)(Object) service.getDirectoryService().users().aliases().list(user.getPrimaryEmail()).execute().getAliases();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+
+                if (aliases != null) {
+                    for (ArrayMap alias : aliases) {
+                        userEntry.add(SchemaConstants.EMAIL_AT, alias.get("alias").toString());
+                    }
+                }
+
+
 
                 entryCache.put(dn.getName(), userEntry);
             } catch (Exception ex) {
@@ -505,17 +491,16 @@ public class GooglePartition implements Partition {
         return userEntry;
     }
 
-
     private boolean isGoogle(Dn dn) {
         return googleEntry.getDn().equals(dn);
     }
 
     private boolean isGoogleGroups(Dn dn) {
-        return googleGroupsEntry.getDn().getName().equals(dn.getName());
+        return googleGroupsEntry.getDn().equals(dn);
     }
 
     private boolean isGoogleUsers(Dn dn) {
-        return googleUsersEntry.getDn().getName().equals(dn.getName());
+        return googleUsersEntry.getDn().equals(dn);
     }
 
 

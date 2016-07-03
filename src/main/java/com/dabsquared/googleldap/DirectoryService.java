@@ -47,8 +47,7 @@ public class DirectoryService {
      * If modifying these scopes, delete your previously saved credentials
      * at ~/.credentials/admin-directory_v1-java-quickstart.json
      */
-    private static final List<String> SCOPES =
-            Arrays.asList(DirectoryScopes.ADMIN_DIRECTORY_USER_READONLY);
+    private static final List<String> SCOPES = Arrays.asList(DirectoryScopes.ADMIN_DIRECTORY_USER_READONLY, DirectoryScopes.ADMIN_DIRECTORY_GROUP_READONLY, DirectoryScopes.ADMIN_DIRECTORY_GROUP_MEMBER_READONLY);
 
     static {
         try {
