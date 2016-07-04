@@ -14,6 +14,8 @@ import org.apache.directory.api.ldap.model.entry.DefaultEntry;
 import org.apache.directory.api.ldap.model.entry.Entry;
 import org.apache.directory.api.ldap.model.exception.LdapException;
 import org.apache.directory.api.ldap.model.exception.LdapInvalidDnException;
+import org.apache.directory.api.ldap.model.filter.AndNode;
+import org.apache.directory.api.ldap.model.filter.EqualityNode;
 import org.apache.directory.api.ldap.model.name.Dn;
 import org.apache.directory.api.ldap.model.name.Rdn;
 import org.apache.directory.api.ldap.model.schema.SchemaManager;
@@ -29,6 +31,7 @@ import org.apache.logging.log4j.Logger;
 import org.apache.directory.server.core.api.filtering.*;
 import org.slf4j.LoggerFactory;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
@@ -71,7 +74,9 @@ public class GooglePartition implements Partition {
 
     private String domain = null;
 
-    public GooglePartition(String domain)
+    private File clientSecrets = null;
+
+    public GooglePartition(String domain, File clientSecrets)
     {
         initialized = new AtomicBoolean(false);
         entryCache = new LRUCacheMap<String, Entry>(300);
@@ -82,6 +87,8 @@ public class GooglePartition implements Partition {
 
         GOOGLE_GROUPS_DN = GOOGLE_GROUPS_DN + GOOGLE_DN;
         GOOGLE_USERS_DN = GOOGLE_USERS_DN + GOOGLE_DN;
+
+        this.clientSecrets = clientSecrets;
 
         // Build a new authorized API client service.
         service = new com.dabsquared.googleldap.DirectoryService();
@@ -365,7 +372,7 @@ public class GooglePartition implements Partition {
 
             List<Entry> l = new ArrayList<Entry>();
             try {
-                List<Group> groups = service.getDirectoryService().groups().list().setCustomer("my_customer").execute().getGroups();
+                List<Group> groups = service.getDirectoryService(this.clientSecrets).groups().list().setCustomer("my_customer").execute().getGroups();
 
                 for (Group group : groups) {
                     String groupname = group.getEmail().split("@")[0];
@@ -386,7 +393,35 @@ public class GooglePartition implements Partition {
         if (dn.equals(googleUsersEntry.getDn())) {
             List<Entry> l = new ArrayList<Entry>();
             try {
-                List<User> users = this.service.getDirectoryService().users().list().setCustomer("my_customer").execute().getUsers();
+
+                List<User> users = new ArrayList<User>();
+
+                if ((ctx.getFilter() != null && (ctx.getFilter().toString().contains("uid=*") && !ctx.getFilter().toString().contains("&(uid=")) || !ctx.getFilter().toString().contains("&(uid=") ) || ctx.getFilter() == null) {
+                    users = this.service.getDirectoryService(this.clientSecrets).users().list().setCustomer("my_customer").execute().getUsers();
+                } else if(ctx.getFilter() != null && ctx.getFilter().toString().contains("operator)")) {
+                    return new EntryFilteringCursorImpl(new EmptyCursor<Entry>(), ctx, this.schemaManager);
+                } else {
+                    AndNode node = (AndNode) ctx.getFilter();
+
+                    EqualityNode node1 = (EqualityNode) node.getFirstChild();
+                    String uid = node1.getValue().getString();
+                    if (uid.split("@").length == 1) {
+                        uid = uid + "@" + this.domain;
+                    }
+
+                    log.debug("Looking for: " + uid);
+                    User user = null;
+                    try {
+
+                        user = this.service.getDirectoryService(this.clientSecrets).users().get(uid).setProjection("full").execute();
+                    }  catch (com.google.api.client.googleapis.json.GoogleJsonResponseException ex) {
+                        return new EntryFilteringCursorImpl(new EmptyCursor<Entry>(), ctx, this.schemaManager);
+                    }
+                    if (user != null) {
+                        users.add(user);
+                    }
+                }
+
                 for (User un : users) {
                     String email = un.getPrimaryEmail();
                     String[] tokens = email.split("@");
@@ -394,6 +429,7 @@ public class GooglePartition implements Partition {
                     Dn udn = new Dn(this.schemaManager, String.format("cn=%s,%s", tokens[0], GOOGLE_USERS_DN));
                     l.add(createUserEntry(udn, un));
                 }
+
             } catch (Exception ex) {
                 log.error("findOneLevel()", ex);
             }
@@ -403,6 +439,8 @@ public class GooglePartition implements Partition {
                     this.schemaManager
             );
         }
+
+        log.debug("Empty list for " + ctx.getFilter().toString());
 
         // return an empty result
         return new EntryFilteringCursorImpl(new EmptyCursor<Entry>(), ctx, this.schemaManager);
@@ -437,7 +475,7 @@ public class GooglePartition implements Partition {
                 }
 
                 if (user == null) {
-                    user = service.getDirectoryService().users().get(userToCheck).execute();
+                    user = service.getDirectoryService(this.clientSecrets).users().get(userToCheck).execute();
                 }
 
                 //2. Create entry
@@ -451,7 +489,20 @@ public class GooglePartition implements Partition {
                 userEntry.put(SchemaConstants.GIVENNAME_AT, user.getName().getGivenName());
                 userEntry.put(SchemaConstants.SN_AT, user.getName().getFamilyName());
                 userEntry.put(SchemaConstants.OU_AT, "users");
-                userEntry.put(SchemaConstants.UID_NUMBER_AT, user.getId());
+                userEntry.put(SchemaConstants.UID_NUMBER_AT, user.getId().substring(0, Math.min(user.getId().length(), 10)));
+                userEntry.put(SchemaConstants.GID_NUMBER_AT, user.getId().substring(0, Math.min(user.getId().length(), 10)));
+                userEntry.put(SchemaConstants.HOME_DIRECTORY_AT, "/home/"+username);
+                userEntry.put(SchemaConstants.LOGIN_SHELL_AT, "/bin/csh");
+                userEntry.put(SchemaConstants.GECOS_AT, user.getName().getFullName());
+                userEntry.put(SchemaConstants.SHADOW_LAST_CHANGE_AT, "1");
+                userEntry.put(SchemaConstants.SHADOW_MIN_AT, "0");
+                userEntry.put(SchemaConstants.SHADOW_MAX_AT, "999999");
+                userEntry.put(SchemaConstants.SHADOW_WARNING_AT, "0");
+                userEntry.put(SchemaConstants.SHADOW_INACTIVE_AT, "-1");
+                userEntry.put(SchemaConstants.SHADOW_EXPIRE_AT, "-1");
+                userEntry.put(SchemaConstants.SHADOW_FLAG_AT, "0");
+
+
 
                 List <ArrayMap> phones = (List<ArrayMap>) user.getPhones();
                 if (phones != null) {
@@ -475,7 +526,7 @@ public class GooglePartition implements Partition {
                 // Print the first 10 users in the domain.
                 List<ArrayMap> aliases = null;
                 try {
-                    aliases = (List<ArrayMap>)(Object) service.getDirectoryService().users().aliases().list(user.getPrimaryEmail()).execute().getAliases();
+                    aliases = (List<ArrayMap>)(Object) service.getDirectoryService(this.clientSecrets).users().aliases().list(user.getPrimaryEmail()).execute().getAliases();
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
@@ -515,13 +566,17 @@ public class GooglePartition implements Partition {
                 }
 
                 if (group == null) {
-                    group = service.getDirectoryService().groups().get(groupToCheck).execute();
+                    group = service.getDirectoryService(this.clientSecrets).groups().get(groupToCheck).execute();
                 }
+
+                String gid = "" + abs(group.getId().hashCode());
+                gid = gid.substring(0, Math.min(gid.length(), 10));
 
                 //2. Create entry
                 groupEntry = new DefaultEntry(schemaManager, dn);
-                groupEntry.put(SchemaConstants.OBJECT_CLASS_AT, SchemaConstants.TOP_OC, "posixGroup");
-                groupEntry.put(SchemaConstants.GID_NUMBER_AT, "" + abs(group.getId().hashCode()));
+                groupEntry.put(SchemaConstants.OBJECT_CLASS_AT, SchemaConstants.TOP_OC, "posixGroup", "group");
+                groupEntry.put(SchemaConstants.GID_NUMBER_AT, gid);
+                groupEntry.put(SchemaConstants.CN_AT, groupname);
 
                 if (group.getDescription() != null && !group.getDescription().equals("")) {
                     groupEntry.put(SchemaConstants.DESCRIPTION_AT, group.getDescription());
@@ -530,19 +585,18 @@ public class GooglePartition implements Partition {
                 // Print the first 10 users in the domain.
                 List<Member> members = null;
                 try {
-                    members = service.getDirectoryService().members().list(group.getId()).execute().getMembers();
+                    members = service.getDirectoryService(this.clientSecrets).members().list(group.getId()).execute().getMembers();
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
 
-                groupEntry.put(SchemaConstants.MEMBER_UID_AT, "");
-
                 for (Member member: members) {
                     if (member.getEmail() == null) {
-//                        for(User user : users) {
-//                            String uuid = user.getPrimaryEmail().split("@")[0];
-//                            attributes[1].add(uuid);
-//                        }
+                        List<User> users = this.service.getDirectoryService(this.clientSecrets).users().list().setCustomer("my_customer").execute().getUsers();
+                        for (User user : users) {
+                            String uuid = user.getPrimaryEmail().split("@")[0];
+                            groupEntry.add(SchemaConstants.MEMBER_UID_AT, uuid);
+                        }
                     } else {
                         String uuid = member.getEmail().split("@")[0];
                         groupEntry.add(SchemaConstants.MEMBER_UID_AT, uuid);

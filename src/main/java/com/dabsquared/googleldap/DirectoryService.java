@@ -15,9 +15,7 @@ import com.google.api.services.admin.directory.DirectoryScopes;
 import com.google.api.services.admin.directory.model.*;
 import com.google.api.services.admin.directory.Directory;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.util.Arrays;
 import java.util.List;
 /**
@@ -64,10 +62,10 @@ public class DirectoryService {
      * @return an authorized Credential object.
      * @throws IOException
      */
-    public static Credential authorize() throws IOException {
+    public static Credential authorize(File clientJSON) throws IOException {
         // Load client secrets.
         InputStream in =
-                DirectoryService.class.getResourceAsStream("/client_secret.json");
+                new FileInputStream(clientJSON);
         GoogleClientSecrets clientSecrets =
                 GoogleClientSecrets.load(JSON_FACTORY, new InputStreamReader(in));
 
@@ -98,8 +96,8 @@ public class DirectoryService {
      * @return an authorized Directory client service
      * @throws IOException
      */
-    public static Directory getDirectoryService() throws IOException {
-        Credential credential = authorize();
+    public static Directory getDirectoryService(File clientJson) throws IOException {
+        Credential credential = authorize(clientJson);
 
         return new Directory.Builder(
                 HTTP_TRANSPORT, JSON_FACTORY, credential)

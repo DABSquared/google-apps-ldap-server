@@ -52,13 +52,16 @@ public class GoogleLDAPServer {
     private static final Logger log = LogManager.getLogger(GoogleLDAPServer.class);
 
     private File workDir = null;
+    private File clientSecrets = null;
+
     private DirectoryService service;
     private LdapServer server;
     private String domain;
 
-    public GoogleLDAPServer(File workDir, String domain) {
+    public GoogleLDAPServer(File workDir, String domain, File clientSecrets) {
         this.workDir = workDir;
         this.domain = domain;
+        this.clientSecrets = clientSecrets;
 
         // Initialize the LDAP service
         try {
@@ -169,7 +172,7 @@ public class GoogleLDAPServer {
             }
         }
 
-        GooglePartition googlePartition = new GooglePartition(domain);
+        GooglePartition googlePartition = new GooglePartition(domain, this.clientSecrets);
         googlePartition.setId("klinche");
         googlePartition.setSchemaManager(service.getSchemaManager());
         googlePartition.initialize();
@@ -212,8 +215,10 @@ public class GoogleLDAPServer {
             }
             workDir.mkdirs();
 
+            File clientSecret = new File(args[1]);
+
             // Create the server
-            GoogleLDAPServer googleLDAPServer = new GoogleLDAPServer(workDir, args[0]);
+            GoogleLDAPServer googleLDAPServer = new GoogleLDAPServer(workDir, args[0], clientSecret);
 
             // Start the server
             googleLDAPServer.startServer();
