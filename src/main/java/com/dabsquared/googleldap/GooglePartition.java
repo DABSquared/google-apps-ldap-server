@@ -503,7 +503,6 @@ public class GooglePartition implements Partition {
                 userEntry.put(SchemaConstants.SHADOW_FLAG_AT, "0");
 
 
-
                 List <ArrayMap> phones = (List<ArrayMap>) user.getPhones();
                 if (phones != null) {
                     for (ArrayMap phone: phones) {

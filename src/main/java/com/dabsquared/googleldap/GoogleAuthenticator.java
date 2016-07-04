@@ -66,6 +66,7 @@ public class GoogleAuthenticator extends AbstractAuthenticator {
                 log.debug("()::Authentication failed");
                 throw new javax.naming.AuthenticationException("Invalid credentials for user: " + user);
             } else {
+                log.debug("Authed " + user);
                 return new LdapPrincipal(this.getDirectoryService().getSchemaManager(), bindOperationContext.getDn(), AuthenticationLevel.SIMPLE);
             }
         } catch (Exception ex) {
