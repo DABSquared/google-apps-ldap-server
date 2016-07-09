@@ -152,6 +152,12 @@ public class GooglePartition implements Partition {
             entryCache.put(groupDn.getName(), googleGroupsEntry);
             entryCache.put(usersDn.getName(), googleUsersEntry);
 
+            try {
+                this.initPartition();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+
             log.debug("<== GooglePartition::init");
         }
     }
@@ -396,7 +402,29 @@ public class GooglePartition implements Partition {
 
                 List<User> users = new ArrayList<User>();
 
-                if ((ctx.getFilter() != null && (ctx.getFilter().toString().contains("uid=*") && !ctx.getFilter().toString().contains("&(uid=")) || !ctx.getFilter().toString().contains("&(uid=") ) || ctx.getFilter() == null) {
+                if (ctx.getFilter() != null && ctx.getFilter() instanceof EqualityNode) {
+                    EqualityNode node = (EqualityNode) ctx.getFilter();
+                    if (node.getAttribute().equals("uid") && node.getValue().getString().equals("*")) {
+                        users = this.service.getDirectoryService(this.clientSecrets).users().list().setCustomer("my_customer").execute().getUsers();
+                    } else if (node.getAttribute().equals("uid")) {
+                        String uid = node.getValue().getString();
+                        if (uid.split("@").length == 1) {
+                            uid = uid + "@" + this.domain;
+                        }
+
+                        log.debug("Looking for: " + uid);
+                        User user = null;
+                        try {
+
+                            user = this.service.getDirectoryService(this.clientSecrets).users().get(uid).setProjection("full").execute();
+                        }  catch (com.google.api.client.googleapis.json.GoogleJsonResponseException ex) {
+                            return new EntryFilteringCursorImpl(new EmptyCursor<Entry>(), ctx, this.schemaManager);
+                        }
+                        if (user != null) {
+                            users.add(user);
+                        }
+                    }
+                }else if ((ctx.getFilter() != null && (ctx.getFilter().toString().contains("uid=*") && !ctx.getFilter().toString().contains("&(uid=")) || !ctx.getFilter().toString().contains("&(uid=") ) || ctx.getFilter() == null) {
                     users = this.service.getDirectoryService(this.clientSecrets).users().list().setCustomer("my_customer").execute().getUsers();
                 } else if(ctx.getFilter() != null && ctx.getFilter().toString().contains("operator)")) {
                     return new EntryFilteringCursorImpl(new EmptyCursor<Entry>(), ctx, this.schemaManager);
@@ -624,5 +652,28 @@ public class GooglePartition implements Partition {
         return googleUsersEntry.getDn().equals(dn);
     }
 
+
+    private void initPartition() throws IOException, LdapInvalidDnException {
+        List<User> users = users = this.service.getDirectoryService(this.clientSecrets).users().list().setCustomer("my_customer").execute().getUsers();
+        for (User un : users) {
+            String email = un.getPrimaryEmail();
+            String[] tokens = email.split("@");
+
+            Dn udn = new Dn(this.schemaManager, String.format("cn=%s,%s", tokens[0], GOOGLE_USERS_DN));
+            createUserEntry(udn, un);
+        }
+
+        try {
+            List<Group> groups = service.getDirectoryService(this.clientSecrets).groups().list().setCustomer("my_customer").execute().getGroups();
+
+            for (Group group : groups) {
+                String groupname = group.getEmail().split("@")[0];
+                Dn gdn = new Dn(this.schemaManager, String.format("cn=%s,%s", groupname, GOOGLE_GROUPS_DN));
+                createGroupEntry(gdn, group);
+            }
+        } catch (Exception ex) {
+            log.error("findOneLevel()", ex);
+        }
+    }
 
 }

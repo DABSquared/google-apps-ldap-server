@@ -23,8 +23,8 @@ public class GoogleAuthenticator extends AbstractAuthenticator {
 
     private String domain = null;
 
-    protected GoogleAuthenticator(AuthenticationLevel type, String domain) {
-        super(type);
+    protected GoogleAuthenticator(String domain) {
+        super(AuthenticationLevel.SIMPLE);
         this.domain = domain;
     }
 

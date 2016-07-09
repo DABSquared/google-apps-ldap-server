@@ -27,8 +27,7 @@ public class DirectoryService {
             "Crowd Google Apps";
 
     /** Directory to store user credentials for this application. */
-    private static final java.io.File DATA_STORE_DIR = new java.io.File(
-            System.getProperty("user.home"), ".credentials/admin-directory_v1-java-quickstart.json");
+    private static final java.io.File DATA_STORE_DIR = new java.io.File(".credentials/admin-directory_v1-java-quickstart.json");
 
     /** Global instance of the {@link FileDataStoreFactory}. */
     private static FileDataStoreFactory DATA_STORE_FACTORY;

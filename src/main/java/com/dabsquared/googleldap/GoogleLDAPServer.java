@@ -167,7 +167,7 @@ public class GoogleLDAPServer {
                 log.debug("" + interceptor.getName());
                 AuthenticationInterceptor ai = (AuthenticationInterceptor) interceptor;
                 Set<Authenticator> auths = new HashSet<Authenticator>();
-                auths.add(new GoogleAuthenticator(AuthenticationLevel.SIMPLE, this.domain)); //TODO: Make a google authenticator
+                auths.add(new GoogleAuthenticator(this.domain));
                 ai.setAuthenticators(auths);
             }
         }
