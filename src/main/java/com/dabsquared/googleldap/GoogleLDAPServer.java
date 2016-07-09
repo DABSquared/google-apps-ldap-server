@@ -25,6 +25,7 @@ import org.apache.directory.server.core.partition.impl.btree.jdbm.JdbmPartition;
 import org.apache.directory.server.core.partition.ldif.LdifPartition;
 import org.apache.directory.server.i18n.I18n;
 import org.apache.directory.server.ldap.LdapServer;
+import org.apache.directory.server.ldap.handlers.extended.StartTlsHandler;
 import org.apache.directory.server.protocol.shared.store.LdifFileLoader;
 import org.apache.directory.server.protocol.shared.store.LdifLoadFilter;
 import org.apache.directory.server.protocol.shared.transport.TcpTransport;
@@ -194,7 +195,22 @@ public class GoogleLDAPServer {
 
         Transport t = new TcpTransport(serverPort);
 
-        server.setTransports(t);
+
+            String keyStore = "ldap-server.keystore";
+            String password = "changeit";
+
+            t.setEnableSSL(true);
+            server.setKeystoreFile(keyStore);
+            server.setCertificatePassword(password);
+            server.addExtendedOperationHandler(new StartTlsHandler());
+
+        Transport t2 = new TcpTransport(636);
+
+        t2.setEnableSSL(true);
+        
+
+
+        server.setTransports(t, t2);
         server.setDirectoryService(service);
         server.start();
     }

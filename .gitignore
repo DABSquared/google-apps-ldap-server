@@ -9,3 +9,8 @@ buildNumber.properties
 .mvn/timing.properties
 work
 *.json
+ldap-server.keystore
+*.cert
+*.key
+*.p12
+*.jar
