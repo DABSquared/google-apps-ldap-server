@@ -208,9 +208,12 @@ public class GoogleLDAPServer {
 
         t2.setEnableSSL(true);
         
+        Transport t3 = new TcpTransport(389);
+        t3.setEnableSSL(false);
 
 
-        server.setTransports(t, t2);
+
+        server.setTransports(t, t2, t3);
         server.setDirectoryService(service);
         server.start();
     }
